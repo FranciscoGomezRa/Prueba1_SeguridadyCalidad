@@ -26,6 +26,8 @@ jobs:
           POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
           INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
         run: |
+          # ponytail: buildx version pinned (AL2023 dnf repos don't carry docker-buildx-plugin),
+          # bump the tag below if a newer buildx is ever required.
           set -e
 
           CMDS=$(jq -n \
@@ -40,7 +42,9 @@ jobs:
               "TOKEN=$(curl -s -X PUT http://169.254.169.254/latest/api/token -H \"X-aws-ec2-metadata-token-ttl-seconds: 21600\")",
               "PUBLIC_IP=$(curl -s -H \"X-aws-ec2-metadata-token: $TOKEN\" http://169.254.169.254/latest/meta-data/public-ipv4)",
               "cd /home/ec2-user/app && printf \"JWT_SECRET=%s\\nPOSTGRES_USER=%s\\nPOSTGRES_PASSWORD=%s\\nPOSTGRES_DB=%s\\nPUBLIC_IP=%s\\nPORT_POSTGRES=15442\\nPORT_BACKEND=4444\\nPORT_FRONTEND=3333\\nCOMPOSE_PROJECT_NAME=cuidarteplus-ev\\n\" \($jwt) \($pguser) \($pgpass) \($pgdb) \"$PUBLIC_IP\" > .env",
-              "dnf install -y docker-buildx-plugin",
+              "mkdir -p /usr/local/lib/docker/cli-plugins",
+              "test -x /usr/local/lib/docker/cli-plugins/docker-buildx || curl -sL https://github.com/docker/buildx/releases/download/v0.17.1/buildx-v0.17.1.linux-amd64 -o /usr/local/lib/docker/cli-plugins/docker-buildx",
+              "chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx",
               "cd /home/ec2-user/app && docker-compose up -d --build"
             ]')
 
