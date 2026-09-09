@@ -50,7 +50,7 @@ services:
       context: ./FRONTEND
       dockerfile: Dockerfile
       args:
-        VITE_API_URL: "http://localhost:${PORT_BACKEND:-4444}"
+        VITE_API_URL: "http://${PUBLIC_IP:-localhost}:${PORT_BACKEND:-4444}"
     container_name: cuidarteplus-frontend-ev
     hostname: cuidarteplus-web
     ports:

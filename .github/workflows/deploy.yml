@@ -1,0 +1,62 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1 # ponytail: cambia esto si tu Learner Lab usa otra región
+
+      - name: Deploy via SSM
+        env:
+          REPO_URL: https://github.com/${{ github.repository }}.git
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
+        run: |
+          set -e
+
+          CMDS=$(jq -n \
+            --arg repo "$REPO_URL" \
+            --arg jwt "$JWT_SECRET" \
+            --arg pguser "$POSTGRES_USER" \
+            --arg pgpass "$POSTGRES_PASSWORD" \
+            --arg pgdb "$POSTGRES_DB" \
+            '[
+              "set -e",
+              "if [ -d /home/ec2-user/app ]; then cd /home/ec2-user/app && git pull; else git clone \($repo) /home/ec2-user/app && cd /home/ec2-user/app; fi",
+              "TOKEN=$(curl -s -X PUT http://169.254.169.254/latest/api/token -H \"X-aws-ec2-metadata-token-ttl-seconds: 21600\")",
+              "PUBLIC_IP=$(curl -s -H \"X-aws-ec2-metadata-token: $TOKEN\" http://169.254.169.254/latest/meta-data/public-ipv4)",
+              "cd /home/ec2-user/app && printf \"JWT_SECRET=%s\\nPOSTGRES_USER=%s\\nPOSTGRES_PASSWORD=%s\\nPOSTGRES_DB=%s\\nPUBLIC_IP=%s\\nPORT_POSTGRES=15442\\nPORT_BACKEND=4444\\nPORT_FRONTEND=3333\\nCOMPOSE_PROJECT_NAME=cuidarteplus-ev\\n\" \($jwt) \($pguser) \($pgpass) \($pgdb) \"$PUBLIC_IP\" > .env",
+              "cd /home/ec2-user/app && docker-compose up -d --build"
+            ]')
+
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --comment "Deploy cuidarteplus" \
+            --parameters "{\"commands\": $CMDS}" \
+            --query "Command.CommandId" --output text)
+
+          echo "Command ID: $COMMAND_ID"
+          aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" || true
+
+          RESULT=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID")
+          echo "$RESULT" | jq .
+          STATUS=$(echo "$RESULT" | jq -r .Status)
+          if [ "$STATUS" != "Success" ]; then
+            echo "::error::Deploy falló con estado $STATUS"
+            exit 1
+          fi
