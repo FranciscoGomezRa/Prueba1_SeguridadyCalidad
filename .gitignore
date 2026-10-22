@@ -4,3 +4,13 @@ FRONTEND/node_modules
 .env
 BACKEND/.env
 FRONTEND/.env
+
+# Secretos: nunca versionar (claves SSH, variantes de .env, tokens)
+*.pem
+*.key
+*.ppk
+.env.*
+**/.env
+**/.env.*
+!**/.env.example
+*token*.txt
